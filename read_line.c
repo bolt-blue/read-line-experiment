@@ -20,7 +20,17 @@
  */
 #define LINEBUF_BASE_SZ (512 > BUFSZ ? 512 : BUFSZ)
 
+/* ========================================================================== */
+
+struct line_t {
+    char *buf;  // Line buffer
+    int len;    // Length of string stored at `buf`, not including '\0'
+    int sz;     // Allocated size in bytes
+};
+
 static int find_newline_(char *, int);
+
+/* ========================================================================== */
 
 char *
 read_line(int fd)
