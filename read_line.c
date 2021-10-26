@@ -32,9 +32,22 @@ static int find_newline_(char *, int);
 
 /* ========================================================================== */
 
+/*
+ * Read one line from an open file with descriptor `fd`
+ * This is a buffered read, where each subsequent call will return
+ * the next line.
+ * The newline char is not preserved.
+ * Returns:
+ * - Pointer to malloc'd string on success
+ *   The returned pointer must be free'd manually by the caller
+ * - NULL pointer on EOF or failure
+ * TODO: Catch and handle more error conditions
+ */
 char *
 read_line(int fd)
 {
+    // TODO: How do we have the `line` buffer free'd on exit without
+    // burdening the caller?
     static struct line_t line;
     char read_buf[BUFSZ + 1] = {0};
 
