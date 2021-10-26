@@ -4,10 +4,20 @@
 
 #include "read_line.h"
 
-// May be defined at compile time
+/*
+ * BUFSZ is the read buffer size - it may be defined at compile time
+ */
 #ifndef BUFSZ
 #define BUFSZ 8
 #endif
+/*
+ * LINEBUF_BASE_SZ is a dynamic scratch buffer that allows us to concatenate
+ * lines that are longer than the read buffer.
+ * Any enlargement of this buffer will be in multiples of this size.
+ * We make sure this is larger than BUFSZ at compile time, to avoid
+ * wasted effort at runtime.
+ * TODO: Confirm the compiler optimises away the following ternary op.
+ */
 #define LINEBUF_BASE_SZ (512 > BUFSZ ? 512 : BUFSZ)
 
 static int find_newline_(char *, int);
@@ -15,55 +25,56 @@ static int find_newline_(char *, int);
 char *
 read_line(int fd)
 {
-    static struct line_t line_buf;
-    char buf[BUFSZ + 1] = {0};
+    static struct line_t line;
+    char read_buf[BUFSZ + 1] = {0};
 
-    if (!line_buf.p) {
-        line_buf.p = malloc_z(1, LINEBUF_BASE_SZ + 1);
-        line_buf.sz = LINEBUF_BASE_SZ;
+    if (!line.buf) {
+        line.buf = malloc_z(1, LINEBUF_BASE_SZ + 1);
+        line.sz = LINEBUF_BASE_SZ;
+        line.buf[line.sz] = '\0';
     }
 
-    if (line_buf.len) {
+    if (line.len) {
         // Handle edge case of more than one newline
         // having been pulled into the buffer on last read
         int nl;
-        if ((nl = find_newline_(line_buf.p, line_buf.len)) > -1) {
-            line_buf.p[nl] = '\0';
-            line_buf.len = nl;
+        if ((nl = find_newline_(line.buf, line.len)) > -1) {
+            line.buf[nl] = '\0';
+            line.len = nl;
             goto OUT;
         }
     }
 
     int bytes_read;
 
-    while ((bytes_read = read(fd, buf, BUFSZ)) > 0) {
+    while ((bytes_read = read(fd, read_buf, BUFSZ)) > 0) {
         // Keep buffer clean
-        zero(buf + bytes_read, BUFSZ - bytes_read);
+        zero(read_buf + bytes_read, BUFSZ - bytes_read);
 
         // Allocate more space to the line buffer if necessary
-        if (line_buf.sz - line_buf.len < bytes_read) {
+        if (line.sz - line.len < bytes_read) {
             // WARN: Only safe if LINEBUF_BASE_SZ >= BUFSZ (see declaration)
-            int new_sz = line_buf.sz + LINEBUF_BASE_SZ;
+            int new_sz = line.sz + LINEBUF_BASE_SZ;
 
             char *tmp = malloc(new_sz + 1);
-            str_cpy(tmp, line_buf.p);
-            free(line_buf.p);
-            line_buf.p = tmp;
+            str_cpy(tmp, line.buf);
+            free(line.buf);
+            line.buf = tmp;
 
-            zero(line_buf.p + line_buf.sz, new_sz + 1);
-            line_buf.sz = new_sz;
+            zero(line.buf + line.sz, new_sz + 1);
+            line.sz = new_sz;
         }
 
-        str_cat(line_buf.p + line_buf.len, buf);
+        str_cat(line.buf + line.len, read_buf);
 
         // Find first occurence of newline in buffer
         int nl;
-        if ((nl = find_newline_(buf, BUFSZ)) > -1) {
-            line_buf.len += nl;
-            line_buf.p[line_buf.len] = '\0';
+        if ((nl = find_newline_(read_buf, BUFSZ)) > -1) {
+            line.len += nl;
+            line.buf[line.len] = '\0';
             break;
         } else {
-            line_buf.len += bytes_read;
+            line.len += bytes_read;
         }
     }
 
@@ -71,38 +82,37 @@ read_line(int fd)
         return NULL;
 
 OUT:;
-    char *out_str = malloc(line_buf.len + 1);
-    str_cpy(out_str, line_buf.p);
+    char *out_str = malloc(line.len + 1);
+    str_cpy(out_str, line.buf);
 
-    // Shift any data following the newly read line
-    // to the front of the buffer, ready for next call
-    if (line_buf.len < line_buf.sz) {
+    // Shift any data following the newline char to the front of the buffer,
+    // ready for next call
+    if (line.len < line.sz) {
         // The 1 is so we skip the null terminator
-        char *tail = line_buf.p + line_buf.len + 1;
+        char *tail = line.buf + line.len + 1;
         int tail_len = str_len(tail);
 
-        mem_move(line_buf.p, tail);
+        mem_move(line.buf, tail);
 
         // Zero out only what's necessary
-        {
-            int old_len = line_buf.len;
-            line_buf.len = tail_len;
-
-            zero(line_buf.p + line_buf.len + 1, old_len);
-        }
+        // The remainder of the line buffer should already be zero'd
+        int old_len = line.len;
+        line.len = tail_len;
+        zero(line.buf + line.len + 1, old_len);
 
     } else {
-        // Reset
-        line_buf.len = 0;
+        // Reset line buffer
+        zero(line.buf, line.sz);
+        line.len = 0;
     }
 
     return out_str;
 }
 
 int
-find_newline_(char *s, int sz)
+find_newline_(char *s, int len)
 {
-    for (int i = 0; i < sz; i++) {
+    for (int i = 0; i < len; i++) {
         if (s[i] == '\n')
             return i;
     }
